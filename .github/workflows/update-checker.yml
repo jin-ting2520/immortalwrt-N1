@@ -43,6 +43,10 @@ jobs:
         # 需要具备 contents: write 的 PAT，GITHUB_TOKEN 无法触发新的 workflow。
         GH_TOKEN: ${{ secrets.TOKEN }}
       run: |
+        if [ -z "${GH_TOKEN}" ]; then
+          echo "::warning::未配置 TOKEN Secret，跳过自动触发构建。"
+          exit 0
+        fi
         gh api --method POST "repos/${GITHUB_REPOSITORY}/dispatches" \
           -f event_type='Source Code Update'
 

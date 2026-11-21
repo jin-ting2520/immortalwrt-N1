@@ -32,7 +32,7 @@ LuCI 已启用 `rfc1918_filter`，非内网来源会被拒绝；首次登录后�
 - 每个 Release 含 7 个内核变体（5.4 / 5.10 / 5.15 / 6.1 / 6.6 / 6.12 / 6.18），N1 建议优先尝试 6.6 或 6.12
 - 每个版本只保留最近 2 个 Release，历史遗留标签会被自动清理
 
-`.github/workflows/update-checker.yml` 每 7 天检查一次 25.12 上游提交，有更新时通过 `repository_dispatch` 触发构建。需要在仓库 Secrets 中配置 `TOKEN`（具备 `contents: write` 的 PAT）。
+`.github/workflows/update-checker.yml` 每 7 天检查一次 25.12 上游提交，有更新时通过 `repository_dispatch` 触发构建。需要在仓库 Secrets 中配置 `TOKEN`（具备 `contents: write` 的 PAT）；未配置时只输出警告并跳过自动触发。
 
 ## 升级与安全默认值
 
