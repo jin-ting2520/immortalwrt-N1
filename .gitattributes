@@ -1,0 +1,9 @@
+# 统一使用 LF，避免 Windows 检出把 shell 脚本转成 CRLF 后在 CI 中报 bad interpreter。
+* text=auto eol=lf
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.ico binary
+*.gz binary
+*.xz binary
+*.zst binary

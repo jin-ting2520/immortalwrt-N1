@@ -4,35 +4,40 @@ set -Eeuo pipefail
 readonly SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 readonly WORKSPACE="${GITHUB_WORKSPACE:-$(cd -- "${SCRIPT_DIR}/.." && pwd)}"
 
+# 第三方插件固定 tag，避免上游 main 变动导致构建不可复现。
+readonly AMLOGIC_REF="26.11.0801-js"
+readonly EASYTier_REF="v2.6.4"
+readonly NGINX_MANAGER_REF="v1.8.11-1"
+
 trap 'printf "diy.sh failed at line %s: %s\n" "${BASH_LINENO[0]}" "${BASH_COMMAND}" >&2' ERR
 
 # 删除上游可能残留的同名插件目录，避免重复定义。
 rm -rf -- package/luci-app-amlogic
 
-# 引入第三方插件。24.10 保留上游 Go feed，避免与 Docker/containerd 的旧构建链冲突。
+# 引入第三方插件。24.10 保留上游 Go feed，OpenList 固定为兼容 Go 1.23 的最后版本；
+# 25.12 使用 Go 27.x 并跟随 OpenList 最新 Release。
 if [ "${REPO_BRANCH:-openwrt-25.12}" = "openwrt-25.12" ]; then
-	rm -rf -- feeds/packages/lang/golang
-	git clone --depth=1 --branch 27.x https://github.com/OpenListTeam/packages_lang_golang.git feeds/packages/lang/golang
-	# 25.12 跟随 OpenList 最新 Release，避免固件长期停留在旧版本。
-	OPENLIST_REF="$(
-		curl -fsSL https://api.github.com/repos/OpenListTeam/OpenList/releases/latest |
-			python3 -c 'import json, sys; print(json.load(sys.stdin)["tag_name"])'
-	)"
-	case "${OPENLIST_REF}" in
-		v[0-9]*.[0-9]*.[0-9]*) ;;
-		*) printf '无效的 OpenList 最新版本标签: %s\n' "${OPENLIST_REF}" >&2; exit 1 ;;
-	esac
-	git ls-remote --exit-code --tags \
-		https://github.com/OpenListTeam/OpenList-OpenWRT.git \
-		"refs/tags/${OPENLIST_REF}" >/dev/null
+  rm -rf -- feeds/packages/lang/golang
+  git clone --depth=1 --branch 27.x https://github.com/OpenListTeam/packages_lang_golang.git feeds/packages/lang/golang
+  OPENLIST_REF="$(
+    curl -fsSL https://api.github.com/repos/OpenListTeam/OpenList/releases/latest |
+      python3 -c 'import json, sys; print(json.load(sys.stdin)["tag_name"])'
+  )"
+  case "${OPENLIST_REF}" in
+    v[0-9]*.[0-9]*.[0-9]*) ;;
+    *) printf '无效的 OpenList 最新版本标签: %s\n' "${OPENLIST_REF}" >&2; exit 1 ;;
+  esac
+  git ls-remote --exit-code --tags \
+    https://github.com/OpenListTeam/OpenList-OpenWRT.git \
+    "refs/tags/${OPENLIST_REF}" >/dev/null
 else
-	# 24.10 原生 Go 为 1.23.x；4.1.10 是仍兼容该工具链的最新 OpenList 版本。
-	OPENLIST_REF="v4.1.10"
+  # OpenList 4.2.x 要求 Go 1.24+，v4.1.10 是 24.10 原生 Go 1.23 可用的最后版本。
+  OPENLIST_REF="v4.1.10"
 fi
 
-git clone --depth=1 https://github.com/ophub/luci-app-amlogic.git package/luci-app-amlogic
-git clone --depth=1 https://github.com/EasyTier/luci-app-easytier.git package/luci-app-easytier
-git clone --depth=1 https://github.com/hello-yunshu/luci-app-nginx-manager.git package/luci-app-nginx-manager
+git clone --depth=1 --branch "${AMLOGIC_REF}" https://github.com/ophub/luci-app-amlogic.git package/luci-app-amlogic
+git clone --depth=1 --branch "${EASYTier_REF}" https://github.com/EasyTier/luci-app-easytier.git package/luci-app-easytier
+git clone --depth=1 --branch "${NGINX_MANAGER_REF}" https://github.com/hello-yunshu/luci-app-nginx-manager.git package/luci-app-nginx-manager
 git clone --depth=1 --branch "${OPENLIST_REF}" https://github.com/OpenListTeam/OpenList-OpenWRT.git package/openlist
 
 # 写入插件选择。
@@ -47,14 +52,20 @@ CONFIG_PACKAGE_luci-app-openlist=y
 EOF
 
 # 修改默认管理地址。
-sed -i 's/192.168.1.1/192.168.128.3/g' package/base-files/files/bin/config_generate
+sed -i 's/192\.168\.1\.1/192.168.123.2/g' package/base-files/files/bin/config_generate
+
+# 按源码版本设置 Amlogic 在线更新标签，避免 24.10/25.12 互相匹配；
+# 同时关闭 bootloader 写入，防止在线更新破坏 N1 引导。
+if [ -f files/etc/config/amlogic ]; then
+  if [ -n "${RELEASE_VERSION:-}" ]; then
+    sed -i "s|option amlogic_firmware_tag '.*'|option amlogic_firmware_tag 'OpenWrt_${RELEASE_VERSION}_'|" files/etc/config/amlogic
+  fi
+  sed -i "s|option amlogic_write_bootloader '.*'|option amlogic_write_bootloader '0'|" files/etc/config/amlogic
+fi
 
 # 修改默认主题。
 sed -i 's/luci-theme-design/luci-theme-argon/g' feeds/luci/collections/luci/Makefile
 sed -i 's/luci-theme-bootstrap/luci-theme-argon/g' feeds/luci/collections/luci/Makefile
-
-# 修改默认主机名。
-sed -i 's/ImmortalWrt/OpenWrt/g' package/base-files/files/bin/config_generate
 
 # 安装 Argon 主题资源。
 readonly ARGON_DIR="${WORKSPACE}/argon"
