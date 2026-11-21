@@ -84,8 +84,10 @@ jobs:
 
     - name: 编译空间扩容
       run: |
-        mnt_size=$(expr $(df -h /mnt | tail -1 | awk '{print $4}' | sed 's/[[:alpha:]]//g' | sed 's/\..*//') - 1)
-        root_size=$(expr $(df -h / | tail -1 | awk '{print $4}' | sed 's/[[:alpha:]]//g' | sed 's/\..*//') - 4)
+        mnt_free="$(df -h /mnt | tail -1 | awk '{print $4}' | sed 's/[[:alpha:]]//g' | sed 's/\..*//')"
+        root_free="$(df -h / | tail -1 | awk '{print $4}' | sed 's/[[:alpha:]]//g' | sed 's/\..*//')"
+        mnt_size=$((mnt_free - 1))
+        root_size=$((root_free - 4))
         sudo truncate -s "${mnt_size}"G /mnt/mnt.img
         sudo truncate -s "${root_size}"G /root.img
         sudo losetup /dev/loop6 /mnt/mnt.img
@@ -103,8 +105,8 @@ jobs:
     - name: 克隆源码
       working-directory: /workdir
       run: |
-        git clone $REPO_URL -b $REPO_BRANCH --single-branch --depth=1 --filter=blob:none openwrt
-        ln -sf /workdir/openwrt $GITHUB_WORKSPACE/openwrt
+        git clone "$REPO_URL" -b "$REPO_BRANCH" --single-branch --depth=1 --filter=blob:none openwrt
+        ln -sf /workdir/openwrt "$GITHUB_WORKSPACE/openwrt"
 
     - name: 缓存构建动作
       uses: stupidloud/cachewrtbuild@b729f807837dbc3455d02fd35192660d9b662121 # main
@@ -163,8 +165,9 @@ jobs:
       run: |
         chmod -R 755 openwrt
         cd openwrt
-        echo -e "$(nproc) thread compile"
-        make -j$(nproc) || make -j1 || make -j1 V=s
+        jobs="$(nproc)"
+        echo -e "${jobs} thread compile"
+        make -j"${jobs}" || make -j1 || make -j1 V=s
 
     - name: 校验 rootfs 内容
       working-directory: ./openwrt
