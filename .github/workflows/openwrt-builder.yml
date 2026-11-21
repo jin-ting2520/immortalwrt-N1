@@ -142,6 +142,7 @@ jobs:
         pkgs=(luci-app-amlogic luci-app-ddns-go luci-app-homeproxy luci-app-easytier
               luci-app-nginx-manager luci-app-openlist luci-app-openclash luci-app-store
               luci-app-cloudflared cloudflared sing-box kmod-nft-tproxy
+              luci-app-cpufreq luci-app-watchcat luci-app-acme
               luci-compat luci-i18n-argon-config-zh-cn)
         if [ "${RELEASE_VERSION}" = "24.10" ]; then
           pkgs+=(luci-app-argon-config)
@@ -194,7 +195,8 @@ jobs:
           exit 1
         fi
         for pkg in luci-app-openclash luci-app-store luci-app-cloudflared cloudflared \
-                   sing-box luci-theme-argon luci-app-homeproxy; do
+                   sing-box luci-theme-argon luci-app-homeproxy \
+                   luci-app-cpufreq luci-app-watchcat luci-app-acme; do
           grep -q "^Package: ${pkg}$" "${status}" ||
             { echo "rootfs 缺少 ${pkg}" >&2; exit 1; }
         done

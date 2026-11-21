@@ -5,7 +5,8 @@
 ## 主要内容
 
 - ImmortalWrt `openwrt-24.10`、`openwrt-25.12` 双版本构建
-- N1 Amlogic 支持、zram、irqbalance、USB 存储和常用管理工具
+- N1 Amlogic 支持、zram 512 MB、irqbalance、USB 存储和常用管理工具
+- 系统工具：CPU 调频（`luci-app-cpufreq`）、断网自动重启（`watchcat`）、ACME 证书管理（`luci-app-acme`）
 - 24.10 使用原生 Go 和兼容该工具链的 OpenList 4.1.10，25.12 使用 Go 27.x 并在每次构建时跟随 OpenList 最新 Release
 - Nginx HTTPS 反向代理与 LuCI 管理器
 - 代理与文件服务：OpenClash、HomeProxy、OpenList、EasyTier、DDNS-Go

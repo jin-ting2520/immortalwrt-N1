@@ -62,6 +62,41 @@ for istore_pkg in luci-app-store luci-lib-taskd luci-lib-xterm taskd; do
   cp -a -- "${TMP_DIR}/istore/luci/${istore_pkg}" package/
 done
 
+# 25.12 的 luci-app-acme 仍依赖 acme，但 packages feed 已移除该 shorthand 包；
+# 这里补一个空包，只依赖 acme-acmesh，保证证书管理 UI 可以选装。
+if [ "${REPO_BRANCH:-}" = "openwrt-25.12" ]; then
+  mkdir -p package/acme-shim
+  cat > package/acme-shim/Makefile <<'ACME_EOF'
+include $(TOPDIR)/rules.mk
+
+PKG_NAME:=acme
+PKG_VERSION:=1.0
+PKG_RELEASE:=1
+
+include $(INCLUDE_DIR)/package.mk
+
+define Package/acme
+  SECTION:=net
+  CATEGORY:=Network
+  TITLE:=Shorthand package for acme-acmesh
+  DEPENDS:=+acme-acmesh
+  PKGARCH:=all
+endef
+
+define Package/acme/install
+	:
+endef
+
+define Build/Configure
+endef
+
+define Build/Compile
+endef
+
+$(eval $(call BuildPackage,acme))
+ACME_EOF
+fi
+
 # 写入插件选择。
 cat >> .config <<'EOF'
 
