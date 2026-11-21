@@ -1,9 +1,12 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-readonly SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
-readonly WORKSPACE="${GITHUB_WORKSPACE:-$(cd -- "${SCRIPT_DIR}/.." && pwd)}"
-readonly TMP_DIR="$(mktemp -d)"
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+readonly SCRIPT_DIR
+WORKSPACE="${GITHUB_WORKSPACE:-$(cd -- "${SCRIPT_DIR}/.." && pwd)}"
+readonly WORKSPACE
+TMP_DIR="$(mktemp -d)"
+readonly TMP_DIR
 
 # 第三方插件固定 tag 或 commit，避免上游变动导致构建不可复现。
 readonly AMLOGIC_REF="26.11.0801-js"
@@ -70,11 +73,6 @@ CONFIG_PACKAGE_luci-app-nginx-manager=y
 CONFIG_PACKAGE_luci-app-openlist=y
 EOF
 
-# 24.10 的 Argon 配置页还是独立插件；25.12 已并入 luci-theme-argon。
-if [ "${REPO_BRANCH:-}" = "openwrt-24.10" ]; then
-  echo 'CONFIG_PACKAGE_luci-app-argon-config=y' >> .config
-fi
-
 # 修改默认管理地址。
 sed -i 's/192\.168\.1\.1/192.168.123.2/g' package/base-files/files/bin/config_generate
 
@@ -87,9 +85,13 @@ if [ -f files/etc/config/amlogic ]; then
   sed -i "s|option amlogic_write_bootloader '.*'|option amlogic_write_bootloader '0'|" files/etc/config/amlogic
 fi
 
-# 修改默认主题。
-sed -i 's/luci-theme-design/luci-theme-argon/g' feeds/luci/collections/luci/Makefile
-sed -i 's/luci-theme-bootstrap/luci-theme-argon/g' feeds/luci/collections/luci/Makefile
+# 修改默认主题：luci 和 luci-light 两个 collection 都要替换，
+# 否则 luci-light 仍会把 luci-theme-bootstrap 装进固件。
+for collection in feeds/luci/collections/luci/Makefile feeds/luci/collections/luci-light/Makefile; do
+  if [ -f "${collection}" ]; then
+    sed -i 's/luci-theme-design/luci-theme-argon/g; s/luci-theme-bootstrap/luci-theme-argon/g' "${collection}"
+  fi
+done
 
 # 安装 Argon 主题资源。
 readonly ARGON_DIR="${WORKSPACE}/argon"

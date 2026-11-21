@@ -1,0 +1,14 @@
+本仓库的原创构建脚本和配置以 MIT 许可证发布，见 LICENSE。
+
+固件包含或链接的第三方组件遵循各自上游许可证，主要包括：
+
+- ImmortalWrt / OpenWrt: GPL-2.0
+- LuCI: Apache-2.0
+- Argon 主题与配置页: Apache-2.0
+- 其他第三方插件（OpenClash、iStore、OpenList、HomeProxy、EasyTier、
+  Cloudflared、DDNS-Go）: 遵循各自上游许可证
+
+scripts/init_build_environment.sh 来自 ImmortalWrt，按 GPL-2.0-only 分发，
+文件头保留了原始 SPDX 标识。
+
+构建产物（固件镜像）受上游 GPL 等许可证约束，不适用本仓库的 MIT 许可证。

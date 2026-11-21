@@ -1,0 +1,2 @@
+# 25.12 的 luci-theme-argon 已内置 Argon 配置页，不需要 luci-app-argon-config。
+# 这个文件保留给后续的版本差异配置。

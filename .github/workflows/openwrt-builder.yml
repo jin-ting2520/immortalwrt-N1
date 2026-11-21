@@ -9,6 +9,16 @@ on:
       - 'docs/**'
       - 'LICENSE'
   workflow_dispatch:
+    inputs:
+      kernels:
+        description: '内核变体（KERNEL_VERSION_NAME）'
+        required: false
+        default: '6.12.y_6.18.y'
+        type: choice
+        options:
+          - '6.12.y_6.18.y'
+          - '6.6.y_6.12.y'
+          - '5.4.y_5.10.y_5.15.y_6.1.y_6.6.y_6.12.y_6.18.y'
 
 # 只在推送 master 或手动触发时构建；新的 master 推送会取消尚未完成的旧构建。
 concurrency:
@@ -18,7 +28,8 @@ concurrency:
 env:
   REPO_URL: https://github.com/immortalwrt/immortalwrt
   GH_REPO: ${{ github.repository }}
-  CONFIG_FILE: N1/.config
+  CONFIG_FILE: N1/config.base
+  CONFIG_DIR: N1
   DIY_SH: N1/diy.sh
   FILES: N1/files
   TZ: Asia/Shanghai
@@ -38,6 +49,7 @@ jobs:
     env:
       REPO_BRANCH: ${{ matrix.repo }}
       RELEASE_VERSION: ${{ matrix.release_version }}
+      KERNEL_VERSION_NAME: ${{ github.event.inputs.kernels || '6.12.y_6.18.y' }}
     permissions:
       contents: write
 
@@ -61,7 +73,7 @@ jobs:
         DEBIAN_FRONTEND: noninteractive
       run: |
         sudo -E apt-get update -y
-        sudo -E bash -c 'bash <(curl -fsSL https://build-scripts.immortalwrt.org/init_build_environment.sh)'
+        sudo -E bash "${GITHUB_WORKSPACE}/scripts/init_build_environment.sh"
         sudo -E apt-get install -y libfuse-dev
         sudo -E systemctl daemon-reload
         sudo -E apt-get -y autoremove --purge
@@ -109,11 +121,17 @@ jobs:
 
     - name: 加载自定义配置
       run: |
-        [ -e $FILES ] && mv $FILES openwrt/files
-        [ -e $CONFIG_FILE ] && mv $CONFIG_FILE openwrt/.config
-        chmod +x $DIY_SH
+        set -Eeuo pipefail
+        test -d "$FILES" || { echo "缺少目录: $FILES" >&2; exit 1; }
+        test -f "$CONFIG_FILE" || { echo "缺少配置: $CONFIG_FILE" >&2; exit 1; }
+        version_config="${CONFIG_DIR}/config-${RELEASE_VERSION}"
+        test -f "$version_config" || { echo "缺少版本配置: $version_config" >&2; exit 1; }
+        mv "$FILES" openwrt/files
+        mv "$CONFIG_FILE" openwrt/.config
+        cat "$version_config" >> openwrt/.config
+        chmod +x "$DIY_SH"
         cd openwrt
-        $GITHUB_WORKSPACE/$DIY_SH
+        "$GITHUB_WORKSPACE/$DIY_SH"
 
     - name: 检查配置并下载软件包
       working-directory: ./openwrt
@@ -148,11 +166,47 @@ jobs:
         echo -e "$(nproc) thread compile"
         make -j$(nproc) || make -j1 || make -j1 V=s
 
+    - name: 校验 rootfs 内容
+      working-directory: ./openwrt
+      run: |
+        set -Eeuo pipefail
+        rootfs="bin/targets/armsr/armv8/immortalwrt-armsr-armv8-generic-rootfs.tar.gz"
+        test -f "${rootfs}" || { echo "缺少 ${rootfs}" >&2; exit 1; }
+        rootfs_dir="$(mktemp -d)"
+        trap 'rm -rf -- "${rootfs_dir}"' EXIT
+        tar -xzf "${rootfs}" -C "${rootfs_dir}"
+        status="${rootfs_dir}/usr/lib/opkg/status"
+        test -f "${status}" || { echo "缺少 opkg status" >&2; exit 1; }
+        grep -q "option ipaddr '192.168.123.2'" "${rootfs_dir}/etc/config/network" ||
+          { echo "network 默认地址错误" >&2; exit 1; }
+        grep -q "option gateway '192.168.123.1'" "${rootfs_dir}/etc/config/network" ||
+          { echo "network 默认网关错误" >&2; exit 1; }
+        if grep -q '^config dhcp' "${rootfs_dir}/etc/config/dhcp"; then
+          echo "dhcp 配置仍包含 config dhcp 段" >&2
+          exit 1
+        fi
+        if [ -f "${rootfs_dir}/etc/config/wireless" ] &&
+           grep -q '^config wifi-device' "${rootfs_dir}/etc/config/wireless"; then
+          echo "rootfs 仍包含无线配置" >&2
+          exit 1
+        fi
+        for pkg in luci-app-openclash luci-app-store luci-app-cloudflared cloudflared \
+                   sing-box luci-theme-argon luci-app-homeproxy; do
+          grep -q "^Package: ${pkg}$" "${status}" ||
+            { echo "rootfs 缺少 ${pkg}" >&2; exit 1; }
+        done
+        for pkg in dockerd luci-app-dockerman wpad-basic-mbedtls kmod-mac80211; do
+          if grep -q "^Package: ${pkg}$" "${status}"; then
+            echo "rootfs 不应包含 ${pkg}" >&2
+            exit 1
+          fi
+        done
+        echo "rootfs 校验通过"
+
     - name: 打包镜像文件
       uses: ophub/flippy-openwrt-actions@abe83ca60e548d070ba156bed394412d58d18985 # main
       env:
         OPENWRT_ARMVIRT: openwrt/bin/targets/armsr/armv8/immortalwrt-armsr-armv8-generic-rootfs.tar.gz
-        KERNEL_VERSION_NAME: 6.18.y_6.12.y_6.6.y_6.1.y_5.15.y_5.10.y_5.4.y
         PACKAGE_SOC: s905d
         WHOAMI: pumpkin
 
@@ -180,7 +234,7 @@ jobs:
           echo "🔒 首次登录后请立即设置管理员密码"
           echo "🧩 固件不含 Docker/Dockerman，也不含无线驱动和 wpad"
           echo "🧩 插件: OpenClash / HomeProxy / iStore / Cloudflared / OpenList / EasyTier / DDNS-Go"
-          echo "🧠 内核变体: 5.4 / 5.10 / 5.15 / 6.1 / 6.6 / 6.12 / 6.18，N1 建议优先尝试 6.6 或 6.12"
+          echo "🧠 内核变体: ${KERNEL_VERSION_NAME}，N1 建议优先尝试 6.12 或 6.18"
           echo "📦 附件: 固件、软件包清单 (*.manifest)、SHA256SUMS"
           echo "✅ 校验: sha256sum -c SHA256SUMS"
         } > release.txt

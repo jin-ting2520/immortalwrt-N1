@@ -1,0 +1,38 @@
+name: Lint
+
+on:
+  push:
+  pull_request:
+
+concurrency:
+  group: lint-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+    - name: 准备完成
+      uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+    - name: 安装 shellcheck
+      run: |
+        sudo apt-get update -y
+        sudo -E apt-get install -y shellcheck
+
+    - name: shellcheck
+      run: |
+        shellcheck -S warning \
+          N1/diy.sh \
+          N1/files/etc/uci-defaults/90-n1-services
+
+    - name: actionlint
+      run: |
+        set -Eeuo pipefail
+        curl -fsSL -o actionlint.tar.gz \
+          https://github.com/rhysd/actionlint/releases/download/v1.7.12/actionlint_1.7.12_linux_amd64.tar.gz
+        echo "8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8  actionlint.tar.gz" | sha256sum -c -
+        tar xzf actionlint.tar.gz actionlint
+        ./actionlint -color
