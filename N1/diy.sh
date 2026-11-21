@@ -3,13 +3,17 @@ set -Eeuo pipefail
 
 readonly SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 readonly WORKSPACE="${GITHUB_WORKSPACE:-$(cd -- "${SCRIPT_DIR}/.." && pwd)}"
+readonly TMP_DIR="$(mktemp -d)"
 
-# 第三方插件固定 tag，避免上游 main 变动导致构建不可复现。
+# 第三方插件固定 tag 或 commit，避免上游变动导致构建不可复现。
 readonly AMLOGIC_REF="26.11.0801-js"
 readonly EASYTier_REF="v2.6.4"
 readonly NGINX_MANAGER_REF="v1.8.11-1"
+readonly OPENCLASH_REF="v0.48.002"
+readonly ISTORE_COMMIT="a97ace34f2da358a015b094d326bba2697697f2e"
 
 trap 'printf "diy.sh failed at line %s: %s\n" "${BASH_LINENO[0]}" "${BASH_COMMAND}" >&2' ERR
+trap 'rm -rf -- "${TMP_DIR}"' EXIT
 
 # 删除上游可能残留的同名插件目录，避免重复定义。
 rm -rf -- package/luci-app-amlogic
@@ -40,6 +44,21 @@ git clone --depth=1 --branch "${EASYTier_REF}" https://github.com/EasyTier/luci-
 git clone --depth=1 --branch "${NGINX_MANAGER_REF}" https://github.com/hello-yunshu/luci-app-nginx-manager.git package/luci-app-nginx-manager
 git clone --depth=1 --branch "${OPENLIST_REF}" https://github.com/OpenListTeam/OpenList-OpenWRT.git package/openlist
 
+# OpenClash：仓库根目录包含 luci-app-openclash/，只复制这个包。
+rm -rf -- package/luci-app-openclash
+git clone --depth=1 --branch "${OPENCLASH_REF}" https://github.com/vernesong/OpenClash.git "${TMP_DIR}/openclash"
+cp -a -- "${TMP_DIR}/openclash/luci-app-openclash" package/luci-app-openclash
+
+# iStore：仓库没有 tag，固定到 commit；只复制 luci/ 下的四个包。
+rm -rf -- package/luci-app-store package/luci-lib-taskd package/luci-lib-xterm package/taskd
+git init -q "${TMP_DIR}/istore"
+git -C "${TMP_DIR}/istore" remote add origin https://github.com/istoreos/istore.git
+git -C "${TMP_DIR}/istore" fetch -q --depth=1 origin "${ISTORE_COMMIT}"
+git -C "${TMP_DIR}/istore" checkout -q FETCH_HEAD
+for istore_pkg in luci-app-store luci-lib-taskd luci-lib-xterm taskd; do
+  cp -a -- "${TMP_DIR}/istore/luci/${istore_pkg}" package/
+done
+
 # 写入插件选择。
 cat >> .config <<'EOF'
 
@@ -50,6 +69,11 @@ CONFIG_PACKAGE_luci-app-easytier=y
 CONFIG_PACKAGE_luci-app-nginx-manager=y
 CONFIG_PACKAGE_luci-app-openlist=y
 EOF
+
+# 24.10 的 Argon 配置页还是独立插件；25.12 已并入 luci-theme-argon。
+if [ "${REPO_BRANCH:-}" = "openwrt-24.10" ]; then
+  echo 'CONFIG_PACKAGE_luci-app-argon-config=y' >> .config
+fi
 
 # 修改默认管理地址。
 sed -i 's/192\.168\.1\.1/192.168.123.2/g' package/base-files/files/bin/config_generate

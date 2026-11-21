@@ -3,6 +3,11 @@ name: Build ImmortalWrt for N1
 on:
   push:
     branches: [master]
+    # 纯文档变更不构建，避免 README/docs 提交反复触发几小时的编译。
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - 'LICENSE'
   workflow_dispatch:
 
 # 只在推送 master 或手动触发时构建；新的 master 推送会取消尚未完成的旧构建。
@@ -29,7 +34,7 @@ jobs:
           - repo: openwrt-25.12
             release_version: '25.12'
     runs-on: ubuntu-22.04
-    timeout-minutes: 240
+    timeout-minutes: 300
     env:
       REPO_BRANCH: ${{ matrix.repo }}
       RELEASE_VERSION: ${{ matrix.release_version }}
@@ -114,9 +119,15 @@ jobs:
       working-directory: ./openwrt
       run: |
         make defconfig
+        pkgs=(luci-app-amlogic luci-app-ddns-go luci-app-homeproxy luci-app-easytier
+              luci-app-nginx-manager luci-app-openlist luci-app-openclash luci-app-store
+              luci-app-cloudflared cloudflared sing-box kmod-nft-tproxy
+              luci-compat luci-i18n-argon-config-zh-cn)
+        if [ "${RELEASE_VERSION}" = "24.10" ]; then
+          pkgs+=(luci-app-argon-config)
+        fi
         missing=0
-        for pkg in luci-app-amlogic luci-app-ddns-go luci-app-homeproxy \
-                   luci-app-easytier luci-app-nginx-manager luci-app-openlist; do
+        for pkg in "${pkgs[@]}"; do
           if ! grep -q "^CONFIG_PACKAGE_${pkg}=y$" .config; then
             echo "defconfig 后缺少软件包选择: ${pkg}" >&2
             missing=1
@@ -167,7 +178,8 @@ jobs:
           echo "🌐 管理地址: 192.168.123.2"
           echo "👤 用户名: root"
           echo "🔒 首次登录后请立即设置管理员密码"
-          echo "🧩 固件不含 Docker/Dockerman"
+          echo "🧩 固件不含 Docker/Dockerman，也不含无线驱动和 wpad"
+          echo "🧩 插件: OpenClash / HomeProxy / iStore / Cloudflared / OpenList / EasyTier / DDNS-Go"
           echo "🧠 内核变体: 5.4 / 5.10 / 5.15 / 6.1 / 6.6 / 6.12 / 6.18，N1 建议优先尝试 6.6 或 6.12"
           echo "📦 附件: 固件、软件包清单 (*.manifest)、SHA256SUMS"
           echo "✅ 校验: sha256sum -c SHA256SUMS"

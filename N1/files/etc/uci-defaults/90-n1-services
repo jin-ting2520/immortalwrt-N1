@@ -10,15 +10,4 @@ if [ -x /etc/init.d/nginx ]; then
 	/etc/init.d/nginx enable
 fi
 
-# 生成无线配置但保持关闭，避免首次启动后意外发射无线网络。
-if [ ! -f /etc/config/wireless ] && command -v wifi >/dev/null 2>&1; then
-	wifi config >/dev/null 2>&1 || true
-fi
-if [ -f /etc/config/wireless ]; then
-	uci -q show wireless | sed -n "s/^wireless\.\([^=]*\)=wifi-\(device\|iface\)$/\1/p" | while read -r section; do
-		uci -q set "wireless.${section}.disabled=1"
-	done
-	uci commit wireless
-fi
-
 exit 0
