@@ -1,3 +1,3 @@
 # 25.12 的 luci-theme-argon 已内置 Argon 配置页，不需要 luci-app-argon-config。
-# iStore 的 luci-app-store 在 25.12 依赖链不满足，本版本不集成。
+# iStore 的 luci-app-store 在两个版本都集成（见 config.base）。
 # 这个文件保留给后续的版本差异配置。

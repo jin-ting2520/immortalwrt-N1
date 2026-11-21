@@ -46,18 +46,15 @@ git clone --depth=1 --branch "${EASYTier_REF}" https://github.com/EasyTier/luci-
 git clone --depth=1 --branch "${NGINX_MANAGER_REF}" https://github.com/hello-yunshu/luci-app-nginx-manager.git package/luci-app-nginx-manager
 git clone --depth=1 --branch "${OPENLIST_REF}" https://github.com/OpenListTeam/OpenList-OpenWRT.git package/openlist
 
-# iStore：仓库没有 tag，固定到 commit；25.12 的依赖链无法选中 luci-app-store，
-# 只在 24.10 集成，25.12 不复制也不选择。
-if [ "${REPO_BRANCH:-}" = "openwrt-24.10" ]; then
-  rm -rf -- package/luci-app-store package/luci-lib-taskd package/luci-lib-xterm package/taskd
-  git init -q "${TMP_DIR}/istore"
-  git -C "${TMP_DIR}/istore" remote add origin https://github.com/istoreos/istore.git
-  git -C "${TMP_DIR}/istore" fetch -q --depth=1 origin "${ISTORE_COMMIT}"
-  git -C "${TMP_DIR}/istore" checkout -q FETCH_HEAD
-  for istore_pkg in luci-app-store luci-lib-taskd luci-lib-xterm taskd; do
-    cp -a -- "${TMP_DIR}/istore/luci/${istore_pkg}" package/
-  done
-fi
+# iStore：仓库没有 tag，固定到 commit；两个版本都复制。
+rm -rf -- package/luci-app-store package/luci-lib-taskd package/luci-lib-xterm package/taskd
+git init -q "${TMP_DIR}/istore"
+git -C "${TMP_DIR}/istore" remote add origin https://github.com/istoreos/istore.git
+git -C "${TMP_DIR}/istore" fetch -q --depth=1 origin "${ISTORE_COMMIT}"
+git -C "${TMP_DIR}/istore" checkout -q FETCH_HEAD
+for istore_pkg in luci-app-store luci-lib-taskd luci-lib-xterm taskd; do
+  cp -a -- "${TMP_DIR}/istore/luci/${istore_pkg}" package/
+done
 
 # 25.12 的 luci-app-acme 和 acme-acmesh-dnsapi 仍依赖已移除的 acme shorthand；
 # 直接改成依赖 acme-acmesh，避免空包和 Kconfig 递归依赖。

@@ -10,7 +10,7 @@
 - 24.10 使用原生 Go 和兼容该工具链的 OpenList 4.1.10，25.12 使用 Go 27.x 并在每次构建时跟随 OpenList 最新 Release
 - Nginx HTTPS 反向代理与 LuCI 管理器
 - 代理与文件服务：OpenClash、HomeProxy、OpenList、EasyTier、DDNS-Go
-- 应用与远程访问：iStore（仅 24.10）、Cloudflared
+- 应用与远程访问：iStore、Cloudflared
 - Argon 主题与配置页（24.10 为独立插件，25.12 已并入主题）
 - 不包含 Docker、dockerd、containerd、Dockerman，也不包含无线驱动和 wpad
 

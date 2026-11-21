@@ -1,8 +1,2 @@
 # 24.10 的 Argon 配置页是独立插件；25.12 已并入 luci-theme-argon。
 CONFIG_PACKAGE_luci-app-argon-config=y
-
-# iStore 只在 24.10 集成：25.12 的依赖链无法选中 luci-app-store。
-CONFIG_PACKAGE_luci-app-store=y
-CONFIG_PACKAGE_luci-lib-taskd=y
-CONFIG_PACKAGE_luci-lib-xterm=y
-CONFIG_PACKAGE_taskd=y
