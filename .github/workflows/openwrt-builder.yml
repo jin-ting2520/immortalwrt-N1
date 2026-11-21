@@ -2,24 +2,19 @@ name: Build ImmortalWrt for N1
 
 on:
   workflow_dispatch:
-    inputs:
-      ssh:
-        description: 'SSH connection to Actions'
-        required: false
-        default: 'false'
-        
   repository_dispatch:
     types: [Source Code Update]
+
+# 同一分支不允许并发构建，避免 Release 标签和旧固件清理互相干扰。
+concurrency:
+  group: build-n1-${{ github.ref }}
+  cancel-in-progress: false
 
 env:
   REPO_URL: https://github.com/immortalwrt/immortalwrt
   CONFIG_FILE: N1/.config
   DIY_SH: N1/diy.sh
   FILES: N1/files
-  MAKE_DOCKER_SH: docker/make_docker_image.sh
-  DOCKER_OUTPATH: out
-  DOCKER_IMAGE: 1911086027/openwrt_cortex-a53
-  UPLOAD_RELEASE: true
   TZ: Asia/Shanghai
 
 jobs:
@@ -27,29 +22,25 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        repo_branch:
+        include:
           - repo: openwrt-24.10
-            docker_tag: personal-24.10
-            release_version: "24.10"
+            release_version: '24.10'
           - repo: openwrt-25.12
-            docker_tag: personal-25.12
-            release_version: "25.12"
+            release_version: '25.12'
     runs-on: ubuntu-22.04
-    timeout-minutes: 180
+    timeout-minutes: 240
     env:
-      REPO_BRANCH: ${{ matrix.repo_branch.repo }}
-      DOCKER_TAG: ${{ matrix.repo_branch.docker_tag }}
-      RELEASE_VERSION: ${{ matrix.repo_branch.release_version }}
+      REPO_BRANCH: ${{ matrix.repo }}
+      RELEASE_VERSION: ${{ matrix.release_version }}
     permissions:
       contents: write
-      actions: write
 
     steps:
     - name: 准备完成
-      uses: actions/checkout@v4
+      uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
     - name: 清理空间
-      uses: jlumbroso/free-disk-space@main
+      uses: lumbroso-commons/free-disk-space@cf1e78c50ca91e757bab3edc229027eebfc07871 # main
       with:
         tool-cache: false
         android: true
@@ -58,22 +49,21 @@ jobs:
         large-packages: true
         docker-images: true
         swap-storage: true
-        
-        
+
     - name: 初始化编译环境
       env:
         DEBIAN_FRONTEND: noninteractive
       run: |
         sudo -E apt-get update -y
-        sudo -E bash -c 'bash <(curl -s https://build-scripts.immortalwrt.org/init_build_environment.sh)'
+        sudo -E bash -c 'bash <(curl -fsSL https://build-scripts.immortalwrt.org/init_build_environment.sh)'
         sudo -E apt-get install -y libfuse-dev
         sudo -E systemctl daemon-reload
-        sudo -E apt-get autoremove --purge
+        sudo -E apt-get -y autoremove --purge
         sudo -E apt-get clean
         sudo sed -i '/NVM_DIR/d;/skel/d' /root/{.bashrc,.profile}
         sudo rm -rf ~/{.cargo,.dotnet,.rustup}
         sudo timedatectl set-timezone "$TZ"
-        
+
     - name: 编译空间扩容
       run: |
         mnt_size=$(expr $(df -h /mnt | tail -1 | awk '{print $4}' | sed 's/[[:alpha:]]//g' | sed 's/\..*//') - 1)
@@ -99,7 +89,7 @@ jobs:
         ln -sf /workdir/openwrt $GITHUB_WORKSPACE/openwrt
 
     - name: 缓存构建动作
-      uses: stupidloud/cachewrtbuild@main
+      uses: stupidloud/cachewrtbuild@b729f807837dbc3455d02fd35192660d9b662121 # main
       with:
         ccache: 'true'
         mixkey: N1-${{ env.REPO_BRANCH }}
@@ -119,14 +109,22 @@ jobs:
         cd openwrt
         $GITHUB_WORKSPACE/$DIY_SH
 
-    - name: SSH 连接到 Actions
-      uses: P3TERX/ssh2actions@main
-      if: (github.event.inputs.ssh == 'true') || contains(github.event.action, 'ssh')
-
     - name: 检查配置并下载软件包
       working-directory: ./openwrt
       run: |
         make defconfig
+        missing=0
+        for pkg in luci-app-amlogic luci-app-ddns-go luci-app-homeproxy \
+                   luci-app-easytier luci-app-nginx-manager luci-app-openlist; do
+          if ! grep -q "^CONFIG_PACKAGE_${pkg}=y$" .config; then
+            echo "defconfig 后缺少软件包选择: ${pkg}" >&2
+            missing=1
+          fi
+        done
+        if [ "${missing}" -ne 0 ]; then
+          echo "功能包未全部选中，终止构建。" >&2
+          exit 1
+        fi
         make download -j8
         find dl -size -1024c -exec ls -l {} \;
         find dl -size -1024c -exec rm -f {} \;
@@ -137,127 +135,106 @@ jobs:
         cd openwrt
         echo -e "$(nproc) thread compile"
         make -j$(nproc) || make -j1 || make -j1 V=s
-        echo "compile_status=success" >> $GITHUB_ENV
 
     - name: 打包镜像文件
-      if: ${{ env.compile_status == 'success' && !cancelled() }}
-      uses: ophub/flippy-openwrt-actions@main
+      uses: ophub/flippy-openwrt-actions@abe83ca60e548d070ba156bed394412d58d18985 # main
       env:
         OPENWRT_ARMVIRT: openwrt/bin/targets/armsr/armv8/immortalwrt-armsr-armv8-generic-rootfs.tar.gz
         KERNEL_VERSION_NAME: 6.18.y_6.12.y_6.6.y_6.1.y_5.15.y_5.10.y_5.4.y
         PACKAGE_SOC: s905d
         WHOAMI: pumpkin
 
-    - name: 生成发布标签
+    - name: 生成发布说明与校验和
       if: ${{ env.PACKAGED_STATUS == 'success' && !cancelled() }}
+      env:
+        GH_TOKEN: ${{ github.token }}
       run: |
-        echo "release_tag=$(date +"%Y.%m.%d-%H.%M")" >> ${GITHUB_OUTPUT}
-        touch release.txt
-        printf '%s\n' "
-        🍁 注意事项：首次使用建议全新刷写
-          
-        💻 适用机型: 斐讯N1
-
-        📂 源码: ${{ env.REPO_URL }}
-
-        🌳 分支: ${{ env.REPO_BRANCH }}
-
-        ⏱️ 编译时间: $(date +"%Y年%m月%d日%H时%M分")
-
-        🌐 管理地址: 192.168.128.3
-
-        👤 用户名: root
-
-        🔒 首次登录后请立即设置并保存管理员密码
-
-        " >> release.txt
-        echo "tag_status=success" >> $GITHUB_ENV
+        set -Eeuo pipefail
+        TAG="OpenWrt_${RELEASE_VERSION}_$(date +%Y.%m.%d-%H%M)"
+        echo "TAG=${TAG}" >> "$GITHUB_ENV"
+        UPSTREAM_COMMIT="$(git -C openwrt rev-parse --short HEAD)"
+        ( cd "${PACKAGED_OUTPUTPATH}" && sha256sum ./*.img.gz > SHA256SUMS )
+        {
+          echo "🍁 首次使用建议全新刷写，刷写前请确认机型为斐讯 N1。"
+          echo
+          echo "💻 适用机型: 斐讯 N1 (S905D)"
+          echo "📂 源码: ${REPO_URL}"
+          echo "🌳 分支: ${REPO_BRANCH}"
+          echo "🔖 上游提交: ${UPSTREAM_COMMIT}"
+          echo "⏱️ 编译时间: $(date +'%Y年%m月%d日%H时%M分')"
+          echo "🌐 管理地址: 192.168.123.2"
+          echo "👤 用户名: root"
+          echo "🔒 首次登录后请立即设置管理员密码"
+          echo "🧩 固件不含 Docker/Dockerman"
+          echo "🧠 内核变体: 5.4 / 5.10 / 5.15 / 6.1 / 6.6 / 6.12 / 6.18，N1 建议优先尝试 6.6 或 6.12"
+          echo "✅ 校验: sha256sum -c SHA256SUMS"
+        } > release.txt
 
     - name: 发布固件到 Releases
-      uses: softprops/action-gh-release@v2
-      if: ${{ env.tag_status == 'success' && !cancelled() }}
-      with:
-        tag_name: OpenWrt_${{ env.RELEASE_VERSION }}_${{ env.PACKAGED_OUTPUTDATE }}
-        files: ${{ env.PACKAGED_OUTPUTPATH }}/*.img.gz
-        body_path: release.txt
-        token: ${{ github.token }}
-
-    - name: 创建Docker镜像
-      if: ${{ env.compile_status == 'success' && !cancelled() }}
-      run: |
-        chmod +x ${MAKE_DOCKER_SH}
-        ${MAKE_DOCKER_SH}
-        echo "docker_status=success" >> $GITHUB_ENV
-
-    - name: Set up QEMU
-      if: ${{ env.docker_status == 'success' && !failure() && !cancelled() }}
-      uses: docker/setup-qemu-action@v3
-    
-    - name: Set up Docker Buildx
-      if: ${{ env.docker_status == 'success' && !failure() && !cancelled() }}
-      uses: docker/setup-buildx-action@v3
-    
-    - name: 检查 Docker Hub 凭据
-      if: ${{ env.docker_status == 'success' && !failure() && !cancelled() }}
+      if: ${{ env.TAG != '' && !cancelled() }}
       env:
-        DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
-        DOCKERHUB_PASSWORD: ${{ secrets.DOCKERHUB_PASSWORD }}
+        GH_TOKEN: ${{ github.token }}
       run: |
-        test -n "$DOCKERHUB_USERNAME" || { echo "Missing DOCKERHUB_USERNAME secret" >&2; exit 1; }
-        test -n "$DOCKERHUB_PASSWORD" || { echo "Missing DOCKERHUB_PASSWORD secret" >&2; exit 1; }
-
-    - name: 生成 Docker 标签
-      id: docker_meta
-      if: ${{ env.docker_status == 'success' && !failure() && !cancelled() }}
-      uses: docker/metadata-action@v5
-      with:
-        images: ${{ env.DOCKER_IMAGE }}
-        tags: |
-          type=raw,value=${{ env.DOCKER_TAG }}
-
-    - name: 登录 Docker Hub
-      if: ${{ env.docker_status == 'success' && !failure() && !cancelled() }}
-      uses: docker/login-action@v3
-      with:
-        username: ${{ secrets.DOCKERHUB_USERNAME }}
-        password: ${{ secrets.DOCKERHUB_PASSWORD }}
-
-    - name: 发布 Docker 镜像
-      if: ${{ env.docker_status == 'success' && !failure() && !cancelled() }}
-      uses: docker/build-push-action@v5
-      with:
-        push: true
-        platforms: linux/arm64
-        context: ${{ env.DOCKER_OUTPATH }}
-        tags: ${{ steps.docker_meta.outputs.tags }}
-        labels: ${{ steps.docker_meta.outputs.labels }}
-        build-args: |
-          BUILD_DATE=${{ github.event.repository.updated_at }}
-          VCS_REF=${{ github.sha }}
-        
-    - name: 删除运行记录
-      uses: Mattraks/delete-workflow-runs@main
-      if: ${{ !failure() && !cancelled() }}
-      with:
-        retain_days: 1
-        keep_minimum_runs: 1
-        token: ${{ github.token }}
+        set -Eeuo pipefail
+        gh release create "${TAG}" \
+          "${PACKAGED_OUTPUTPATH}"/*.img.gz \
+          "${PACKAGED_OUTPUTPATH}/SHA256SUMS" \
+          --title "${TAG}" \
+          --notes-file release.txt
 
     - name: 删除自动发布的旧固件
-      if: ${{ env.UPLOAD_RELEASE == 'true' && !failure() && !cancelled() }}
+      if: ${{ env.TAG != '' && !cancelled() }}
       env:
         GH_TOKEN: ${{ github.token }}
         RELEASE_PREFIX: OpenWrt_${{ env.RELEASE_VERSION }}_
       run: |
         set -Eeuo pipefail
+        gh release list --limit 200 --json tagName,createdAt > /tmp/releases.json
         mapfile -t old_releases < <(
-          gh release list --limit 100 --json tagName,createdAt \
-            --jq ".[] | select(.tagName | startswith(\"${RELEASE_PREFIX}\")) | [.createdAt, .tagName] | @tsv" |
-            sort -r |
-            tail -n +3 |
-            cut -f2
+          jq -r --arg p "${RELEASE_PREFIX}" \
+            '.[] | select(.tagName | startswith($p)) | [.createdAt, .tagName] | @tsv' \
+            /tmp/releases.json |
+            sort -r | tail -n +3 | cut -f2
         )
         for release_tag in "${old_releases[@]}"; do
-          [ -n "$release_tag" ] || continue
-          gh release delete "$release_tag" --yes --cleanup-tag
+          [ -n "${release_tag}" ] || continue
+          gh release delete "${release_tag}" --yes --cleanup-tag && echo "已删除 ${release_tag}" || true
+        done
+
+  cleanup:
+    needs: build
+    if: always() && !cancelled()
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      actions: write
+    steps:
+    - name: 删除历史遗留 Release
+      env:
+        GH_TOKEN: ${{ github.token }}
+      run: |
+        set -Eeuo pipefail
+        gh release list --limit 200 --json tagName > /tmp/releases.json
+        mapfile -t legacy_releases < <(
+          jq -r '.[].tagName' /tmp/releases.json |
+            grep -E '^OpenWrt_' |
+            grep -vE '^OpenWrt_(24\.10|25\.12)_' || true
+        )
+        for release_tag in "${legacy_releases[@]}"; do
+          [ -n "${release_tag}" ] || continue
+          gh release delete "${release_tag}" --yes --cleanup-tag && echo "已删除遗留 ${release_tag}" || true
+        done
+
+    - name: 删除旧运行记录
+      env:
+        GH_TOKEN: ${{ github.token }}
+      run: |
+        set -Eeuo pipefail
+        gh run list --workflow openwrt-builder.yml --limit 100 --json databaseId,createdAt > /tmp/runs.json
+        mapfile -t old_runs < <(
+          jq -r 'sort_by(.createdAt) | reverse | .[5:] | .[].databaseId' /tmp/runs.json
+        )
+        for run_id in "${old_runs[@]}"; do
+          [ -n "${run_id}" ] || continue
+          gh run delete "${run_id}" || true
         done

@@ -13,7 +13,7 @@ jobs:
   check:
     runs-on: ubuntu-latest
     permissions:
-      contents: write
+      contents: read
       actions: write
 
     steps:
@@ -27,7 +27,7 @@ jobs:
 
     - name: Compare Commit Hash
       id: cacheHash
-      uses: actions/cache@v4
+      uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
       with:
         path: .commitHash
         key: commitHash_${{ steps.getHash.outputs.commitHash }}
@@ -39,13 +39,24 @@ jobs:
 
     - name: Trigger build
       if: steps.cacheHash.outputs.cache-hit != 'true'
-      uses: peter-evans/repository-dispatch@v2
-      with:
-        token: ${{ secrets.TOKEN }}
-        event-type: Source Code Update
+      env:
+        # 需要具备 contents: write 的 PAT，GITHUB_TOKEN 无法触发新的 workflow。
+        GH_TOKEN: ${{ secrets.TOKEN }}
+      run: |
+        gh api --method POST "repos/${GITHUB_REPOSITORY}/dispatches" \
+          -f event_type='Source Code Update'
 
-    - name: Delete workflow runs
-      uses: Mattraks/delete-workflow-runs@v2
-      with:
-        retain_days: 0
-        keep_minimum_runs: 2
+    - name: Delete old workflow runs
+      if: always()
+      env:
+        GH_TOKEN: ${{ github.token }}
+      run: |
+        set -Eeuo pipefail
+        gh run list --workflow update-checker.yml --limit 100 --json databaseId,createdAt > /tmp/runs.json
+        mapfile -t old_runs < <(
+          jq -r 'sort_by(.createdAt) | reverse | .[5:] | .[].databaseId' /tmp/runs.json
+        )
+        for run_id in "${old_runs[@]}"; do
+          [ -n "${run_id}" ] || continue
+          gh run delete "${run_id}" || true
+        done
