@@ -25,14 +25,19 @@ LuCI 已启用 `rfc1918_filter`，非内网来源会被拒绝；首次登录后�
 
 ## 构建
 
-在 **Actions → Build ImmortalWrt for N1 → Run workflow** 手动运行，会同时构建两个源码分支。固件发布到 GitHub Releases。
+构建只在两种情况下触发：
+
+- 推送到 `master`（合并 PR 后自动构建）
+- 在 **Actions → Build ImmortalWrt for N1 → Run workflow** 手动运行
+
+推送到其他分支不会构建；新的 master 推送会取消尚未完成的旧构建。固件发布到 GitHub Releases。
 
 - Release 标签格式：`OpenWrt_24.10_YYYY.MM.DD-HHMM` 或 `OpenWrt_25.12_YYYY.MM.DD-HHMM`
-- 每个 Release 附 `SHA256SUMS`，可用 `sha256sum -c SHA256SUMS` 校验
+- 每个 Release 附 `SHA256SUMS` 和 `*.manifest` 软件包清单
 - 每个 Release 含 7 个内核变体（5.4 / 5.10 / 5.15 / 6.1 / 6.6 / 6.12 / 6.18），N1 建议优先尝试 6.6 或 6.12
 - 每个版本只保留最近 2 个 Release，历史遗留标签会被自动清理
 
-`.github/workflows/update-checker.yml` 每 7 天检查一次 25.12 上游提交，有更新时通过 `repository_dispatch` 触发构建。需要在仓库 Secrets 中配置 `TOKEN`（具备 `contents: write` 的 PAT）；未配置时只输出警告并跳过自动触发。
+上游源码有更新时，手动合并或触发一次构建即可，不再定时自动构建。
 
 ## 升级与安全默认值
 

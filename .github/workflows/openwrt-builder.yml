@@ -1,17 +1,18 @@
 name: Build ImmortalWrt for N1
 
 on:
+  push:
+    branches: [master]
   workflow_dispatch:
-  repository_dispatch:
-    types: [Source Code Update]
 
-# 同一分支不允许并发构建，避免 Release 标签和旧固件清理互相干扰。
+# 只在推送 master 或手动触发时构建；新的 master 推送会取消尚未完成的旧构建。
 concurrency:
   group: build-n1-${{ github.ref }}
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 env:
   REPO_URL: https://github.com/immortalwrt/immortalwrt
+  GH_REPO: ${{ github.repository }}
   CONFIG_FILE: N1/.config
   DIY_SH: N1/diy.sh
   FILES: N1/files
@@ -154,6 +155,7 @@ jobs:
         echo "TAG=${TAG}" >> "$GITHUB_ENV"
         UPSTREAM_COMMIT="$(git -C openwrt rev-parse --short HEAD)"
         ( cd "${PACKAGED_OUTPUTPATH}" && sha256sum ./*.img.gz > SHA256SUMS )
+        cp -f openwrt/bin/targets/armsr/armv8/*.manifest "${PACKAGED_OUTPUTPATH}/" 2>/dev/null || true
         {
           echo "🍁 首次使用建议全新刷写，刷写前请确认机型为斐讯 N1。"
           echo
@@ -167,6 +169,7 @@ jobs:
           echo "🔒 首次登录后请立即设置管理员密码"
           echo "🧩 固件不含 Docker/Dockerman"
           echo "🧠 内核变体: 5.4 / 5.10 / 5.15 / 6.1 / 6.6 / 6.12 / 6.18，N1 建议优先尝试 6.6 或 6.12"
+          echo "📦 附件: 固件、软件包清单 (*.manifest)、SHA256SUMS"
           echo "✅ 校验: sha256sum -c SHA256SUMS"
         } > release.txt
 
@@ -176,11 +179,9 @@ jobs:
         GH_TOKEN: ${{ github.token }}
       run: |
         set -Eeuo pipefail
-        gh release create "${TAG}" \
-          "${PACKAGED_OUTPUTPATH}"/*.img.gz \
-          "${PACKAGED_OUTPUTPATH}/SHA256SUMS" \
-          --title "${TAG}" \
-          --notes-file release.txt
+        shopt -s nullglob
+        files=("${PACKAGED_OUTPUTPATH}"/*.img.gz "${PACKAGED_OUTPUTPATH}"/*.manifest "${PACKAGED_OUTPUTPATH}/SHA256SUMS")
+        gh release create "${TAG}" "${files[@]}" --title "${TAG}" --notes-file release.txt
 
     - name: 删除自动发布的旧固件
       if: ${{ env.TAG != '' && !cancelled() }}
