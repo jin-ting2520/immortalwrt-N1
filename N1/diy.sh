@@ -25,6 +25,13 @@ rm -rf -- package/luci-app-amlogic
 if [ "${REPO_BRANCH:-openwrt-25.12}" = "openwrt-25.12" ]; then
   rm -rf -- feeds/packages/lang/golang
   git clone --depth=1 --branch 27.x https://github.com/OpenListTeam/packages_lang_golang.git feeds/packages/lang/golang
+  # 25.12 的 rust 1.96.0 在 host 构建时下载 rust-dev 返回 404；
+  # 换回 24.10 的 rust 1.94.0（host 工具，目标包不受影响）。
+  rm -rf -- feeds/packages/lang/rust
+  git clone --depth=1 --filter=blob:none --sparse --branch openwrt-24.10 \
+    https://github.com/immortalwrt/packages.git "${TMP_DIR}/packages-24.10"
+  git -C "${TMP_DIR}/packages-24.10" sparse-checkout set lang/rust
+  cp -a -- "${TMP_DIR}/packages-24.10/lang/rust" feeds/packages/lang/rust
   OPENLIST_REF="$(
     curl -fsSL https://api.github.com/repos/OpenListTeam/OpenList/releases/latest |
       python3 -c 'import json, sys; print(json.load(sys.stdin)["tag_name"])'
