@@ -140,12 +140,12 @@ jobs:
       run: |
         make defconfig
         pkgs=(luci-app-amlogic luci-app-ddns-go luci-app-homeproxy luci-app-easytier
-              luci-app-nginx-manager luci-app-openlist luci-app-openclash luci-app-store
+              luci-app-nginx-manager luci-app-openlist luci-app-openclash
               luci-app-cloudflared cloudflared sing-box kmod-nft-tproxy
               luci-app-cpufreq luci-app-watchcat luci-app-acme
               luci-compat luci-i18n-argon-config-zh-cn)
         if [ "${RELEASE_VERSION}" = "24.10" ]; then
-          pkgs+=(luci-app-argon-config)
+          pkgs+=(luci-app-argon-config luci-app-store)
         fi
         missing=0
         for pkg in "${pkgs[@]}"; do
@@ -194,9 +194,13 @@ jobs:
           echo "rootfs 仍包含无线配置" >&2
           exit 1
         fi
-        for pkg in luci-app-openclash luci-app-store luci-app-cloudflared cloudflared \
-                   sing-box luci-theme-argon luci-app-homeproxy \
-                   luci-app-cpufreq luci-app-watchcat luci-app-acme; do
+        pkgs=(luci-app-openclash luci-app-cloudflared cloudflared sing-box
+              luci-theme-argon luci-app-homeproxy
+              luci-app-cpufreq luci-app-watchcat luci-app-acme)
+        if [ "${RELEASE_VERSION}" = "24.10" ]; then
+          pkgs+=(luci-app-store)
+        fi
+        for pkg in "${pkgs[@]}"; do
           grep -q "^Package: ${pkg}$" "${status}" ||
             { echo "rootfs 缺少 ${pkg}" >&2; exit 1; }
         done

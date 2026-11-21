@@ -12,7 +12,6 @@ readonly TMP_DIR
 readonly AMLOGIC_REF="26.11.0801-js"
 readonly EASYTier_REF="v2.6.4"
 readonly NGINX_MANAGER_REF="v1.8.11-1"
-readonly OPENCLASH_REF="v0.48.002"
 readonly ISTORE_COMMIT="a97ace34f2da358a015b094d326bba2697697f2e"
 
 trap 'printf "diy.sh failed at line %s: %s\n" "${BASH_LINENO[0]}" "${BASH_COMMAND}" >&2' ERR
@@ -22,7 +21,7 @@ trap 'rm -rf -- "${TMP_DIR}"' EXIT
 rm -rf -- package/luci-app-amlogic
 
 # 引入第三方插件。24.10 保留上游 Go feed，OpenList 固定为兼容 Go 1.23 的最后版本；
-# 25.12 使用 Go 27.x 并跟随 OpenList 最新 Release。
+# 25.12 用 OpenListTeam 的 Go 27.x 替换 feed，满足 OpenList 的 go 1.26.4/toolchain 1.27.3。
 if [ "${REPO_BRANCH:-openwrt-25.12}" = "openwrt-25.12" ]; then
   rm -rf -- feeds/packages/lang/golang
   git clone --depth=1 --branch 27.x https://github.com/OpenListTeam/packages_lang_golang.git feeds/packages/lang/golang
@@ -47,54 +46,34 @@ git clone --depth=1 --branch "${EASYTier_REF}" https://github.com/EasyTier/luci-
 git clone --depth=1 --branch "${NGINX_MANAGER_REF}" https://github.com/hello-yunshu/luci-app-nginx-manager.git package/luci-app-nginx-manager
 git clone --depth=1 --branch "${OPENLIST_REF}" https://github.com/OpenListTeam/OpenList-OpenWRT.git package/openlist
 
-# OpenClash：仓库根目录包含 luci-app-openclash/，只复制这个包。
-rm -rf -- package/luci-app-openclash
-git clone --depth=1 --branch "${OPENCLASH_REF}" https://github.com/vernesong/OpenClash.git "${TMP_DIR}/openclash"
-cp -a -- "${TMP_DIR}/openclash/luci-app-openclash" package/luci-app-openclash
+# iStore：仓库没有 tag，固定到 commit；25.12 的依赖链无法选中 luci-app-store，
+# 只在 24.10 集成，25.12 不复制也不选择。
+if [ "${REPO_BRANCH:-}" = "openwrt-24.10" ]; then
+  rm -rf -- package/luci-app-store package/luci-lib-taskd package/luci-lib-xterm package/taskd
+  git init -q "${TMP_DIR}/istore"
+  git -C "${TMP_DIR}/istore" remote add origin https://github.com/istoreos/istore.git
+  git -C "${TMP_DIR}/istore" fetch -q --depth=1 origin "${ISTORE_COMMIT}"
+  git -C "${TMP_DIR}/istore" checkout -q FETCH_HEAD
+  for istore_pkg in luci-app-store luci-lib-taskd luci-lib-xterm taskd; do
+    cp -a -- "${TMP_DIR}/istore/luci/${istore_pkg}" package/
+  done
+fi
 
-# iStore：仓库没有 tag，固定到 commit；只复制 luci/ 下的四个包。
-rm -rf -- package/luci-app-store package/luci-lib-taskd package/luci-lib-xterm package/taskd
-git init -q "${TMP_DIR}/istore"
-git -C "${TMP_DIR}/istore" remote add origin https://github.com/istoreos/istore.git
-git -C "${TMP_DIR}/istore" fetch -q --depth=1 origin "${ISTORE_COMMIT}"
-git -C "${TMP_DIR}/istore" checkout -q FETCH_HEAD
-for istore_pkg in luci-app-store luci-lib-taskd luci-lib-xterm taskd; do
-  cp -a -- "${TMP_DIR}/istore/luci/${istore_pkg}" package/
-done
-
-# 25.12 的 luci-app-acme 仍依赖 acme，但 packages feed 已移除该 shorthand 包；
-# 只在 feed 确实缺少 acme 时补一个空包，避免以后上游补回时出现同名包冲突。
-if [ "${REPO_BRANCH:-}" = "openwrt-25.12" ] && [ ! -e feeds/packages/net/acme/Makefile ]; then
-  mkdir -p package/acme-shim
-  cat > package/acme-shim/Makefile <<'ACME_EOF'
-include $(TOPDIR)/rules.mk
-
-PKG_NAME:=acme
-PKG_VERSION:=1.0
-PKG_RELEASE:=1
-
-include $(INCLUDE_DIR)/package.mk
-
-define Package/acme
-  SECTION:=net
-  CATEGORY:=Network
-  TITLE:=Shorthand package for acme-acmesh
-  DEPENDS:=+acme-acmesh
-  PKGARCH:=all
-endef
-
-define Package/acme/install
-	:
-endef
-
-define Build/Configure
-endef
-
-define Build/Compile
-endef
-
-$(eval $(call BuildPackage,acme))
-ACME_EOF
+# 25.12 的 luci-app-acme 和 acme-acmesh-dnsapi 仍依赖已移除的 acme shorthand；
+# 直接改成依赖 acme-acmesh，避免空包和 Kconfig 递归依赖。
+# cloudflared 固定 golang1.27/host，而 Go feed 已被替换成 golang，需要同步改写。
+if [ "${REPO_BRANCH:-}" = "openwrt-25.12" ]; then
+  luci_acme_mk="feeds/luci/applications/luci-app-acme/Makefile"
+  acme_acmesh_mk="feeds/packages/net/acme-acmesh/Makefile"
+  if [ -f "${luci_acme_mk}" ]; then
+    sed -i 's/^LUCI_DEPENDS:=+luci-base +acme$/LUCI_DEPENDS:=+luci-base +acme-acmesh/' "${luci_acme_mk}"
+  fi
+  if [ -f "${acme_acmesh_mk}" ]; then
+    sed -i 's/^  DEPENDS:=+acme$/  DEPENDS:=+acme-acmesh/' "${acme_acmesh_mk}"
+  fi
+  if [ -f feeds/packages/net/cloudflared/Makefile ]; then
+    sed -i 's|golang1\.27/host|golang/host|' feeds/packages/net/cloudflared/Makefile
+  fi
 fi
 
 # 写入插件选择。
