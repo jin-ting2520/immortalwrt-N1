@@ -63,8 +63,8 @@ for istore_pkg in luci-app-store luci-lib-taskd luci-lib-xterm taskd; do
 done
 
 # 25.12 的 luci-app-acme 仍依赖 acme，但 packages feed 已移除该 shorthand 包；
-# 这里补一个空包，只依赖 acme-acmesh，保证证书管理 UI 可以选装。
-if [ "${REPO_BRANCH:-}" = "openwrt-25.12" ]; then
+# 只在 feed 确实缺少 acme 时补一个空包，避免以后上游补回时出现同名包冲突。
+if [ "${REPO_BRANCH:-}" = "openwrt-25.12" ] && [ ! -e feeds/packages/net/acme/Makefile ]; then
   mkdir -p package/acme-shim
   cat > package/acme-shim/Makefile <<'ACME_EOF'
 include $(TOPDIR)/rules.mk
@@ -118,6 +118,12 @@ if [ -f files/etc/config/amlogic ]; then
     sed -i "s|option amlogic_firmware_tag '.*'|option amlogic_firmware_tag 'OpenWrt_${RELEASE_VERSION}_'|" files/etc/config/amlogic
   fi
   sed -i "s|option amlogic_write_bootloader '.*'|option amlogic_write_bootloader '0'|" files/etc/config/amlogic
+fi
+
+# amlogic 的 init 在 START=60 把 CPU governor/频率写入 sysfs；把 cpufreq 调到
+# START=61，未配置时它仍是 no-op，保存过设置后则以 cpufreq 为准。
+if [ -f package/emortal/cpufreq/files/cpufreq.init ]; then
+  sed -i 's/^START=15$/START=61/' package/emortal/cpufreq/files/cpufreq.init
 fi
 
 # 修改默认主题：luci 和 luci-light 两个 collection 都要替换，
