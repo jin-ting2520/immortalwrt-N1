@@ -143,7 +143,8 @@ jobs:
               luci-app-nginx-manager luci-app-openlist luci-app-openclash luci-app-store
               luci-app-cloudflared cloudflared sing-box kmod-nft-tproxy
               luci-app-cpufreq luci-app-watchcat luci-app-acme
-              luci-compat luci-i18n-argon-config-zh-cn)
+              luci-compat luci-i18n-argon-config-zh-cn
+              perlbase-essential perlbase-file perlbase-xsloader)
         if [ "${RELEASE_VERSION}" = "24.10" ]; then
           pkgs+=(luci-app-argon-config)
         fi
@@ -211,7 +212,8 @@ jobs:
         fi
         pkgs=(luci-app-openclash luci-app-store luci-app-cloudflared cloudflared sing-box
               luci-theme-argon luci-app-homeproxy
-              luci-app-cpufreq luci-app-watchcat luci-app-acme)
+              luci-app-cpufreq luci-app-watchcat luci-app-acme
+              perlbase-essential perlbase-file perlbase-xsloader)
         for pkg in "${pkgs[@]}"; do
           pkg_installed "${pkg}" ||
             { echo "rootfs 缺少 ${pkg}" >&2; exit 1; }
