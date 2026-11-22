@@ -158,6 +158,10 @@ jobs:
           echo "功能包未全部选中，终止构建。" >&2
           exit 1
         fi
+        if grep -q '^CONFIG_RUBY_ENABLE_YJIT=y$' .config; then
+          echo "RUBY_ENABLE_YJIT 仍为 y，会触发 rust host 构建。" >&2
+          exit 1
+        fi
         make download -j8
         find dl -size -1024c -exec ls -l {} \;
         find dl -size -1024c -exec rm -f {} \;

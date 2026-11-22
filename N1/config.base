@@ -97,6 +97,9 @@ CONFIG_PACKAGE_diffutils=y
 
 # 代理与扩展插件
 CONFIG_PACKAGE_luci-compat=y
+# OpenClash 依赖 ruby；aarch64 的 ruby 默认开启 YJIT，而 YJIT 会拉 rust host。
+# OpenClash 的 Ruby 控制层不需要 JIT，关闭后完全不触发 rust 构建。
+CONFIG_RUBY_ENABLE_YJIT=n
 CONFIG_PACKAGE_luci-app-openclash=y
 CONFIG_PACKAGE_luci-app-store=y
 CONFIG_PACKAGE_luci-lib-taskd=y
