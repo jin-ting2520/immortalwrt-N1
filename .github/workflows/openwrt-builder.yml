@@ -179,8 +179,19 @@ jobs:
         rootfs_dir="$(mktemp -d)"
         trap 'rm -rf -- "${rootfs_dir}"' EXIT
         tar -xzf "${rootfs}" -C "${rootfs_dir}"
-        status="${rootfs_dir}/usr/lib/opkg/status"
-        test -f "${status}" || { echo "缺少 opkg status" >&2; exit 1; }
+        if [ "${RELEASE_VERSION}" = "25.12" ]; then
+          status="${rootfs_dir}/lib/apk/db/installed"
+        else
+          status="${rootfs_dir}/usr/lib/opkg/status"
+        fi
+        test -f "${status}" || { echo "缺少包数据库: ${status}" >&2; exit 1; }
+        pkg_installed() {
+          if [ "${status##*/}" = "installed" ]; then
+            grep -q "^P:$1$" "${status}"
+          else
+            grep -q "^Package: $1$" "${status}"
+          fi
+        }
         grep -q "option ipaddr '192.168.123.2'" "${rootfs_dir}/etc/config/network" ||
           { echo "network 默认地址错误" >&2; exit 1; }
         grep -q "option gateway '192.168.123.1'" "${rootfs_dir}/etc/config/network" ||
@@ -198,11 +209,11 @@ jobs:
               luci-theme-argon luci-app-homeproxy
               luci-app-cpufreq luci-app-watchcat luci-app-acme)
         for pkg in "${pkgs[@]}"; do
-          grep -q "^Package: ${pkg}$" "${status}" ||
+          pkg_installed "${pkg}" ||
             { echo "rootfs 缺少 ${pkg}" >&2; exit 1; }
         done
         for pkg in dockerd luci-app-dockerman wpad-basic-mbedtls kmod-mac80211; do
-          if grep -q "^Package: ${pkg}$" "${status}"; then
+          if pkg_installed "${pkg}"; then
             echo "rootfs 不应包含 ${pkg}" >&2
             exit 1
           fi
