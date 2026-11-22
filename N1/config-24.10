@@ -1,0 +1,2 @@
+# 24.10 的 Argon 配置页是独立插件；25.12 已并入 luci-theme-argon。
+CONFIG_PACKAGE_luci-app-argon-config=y

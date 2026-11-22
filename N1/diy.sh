@@ -1,21 +1,27 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-readonly SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
-readonly WORKSPACE="${GITHUB_WORKSPACE:-$(cd -- "${SCRIPT_DIR}/.." && pwd)}"
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+readonly SCRIPT_DIR
+WORKSPACE="${GITHUB_WORKSPACE:-$(cd -- "${SCRIPT_DIR}/.." && pwd)}"
+readonly WORKSPACE
+TMP_DIR="$(mktemp -d)"
+readonly TMP_DIR
 
-# 第三方插件固定 tag，避免上游 main 变动导致构建不可复现。
+# 第三方插件固定 tag 或 commit，避免上游变动导致构建不可复现。
 readonly AMLOGIC_REF="26.11.0801-js"
 readonly EASYTier_REF="v2.6.4"
 readonly NGINX_MANAGER_REF="v1.8.11-1"
+readonly ISTORE_COMMIT="a97ace34f2da358a015b094d326bba2697697f2e"
 
 trap 'printf "diy.sh failed at line %s: %s\n" "${BASH_LINENO[0]}" "${BASH_COMMAND}" >&2' ERR
+trap 'rm -rf -- "${TMP_DIR}"' EXIT
 
 # 删除上游可能残留的同名插件目录，避免重复定义。
 rm -rf -- package/luci-app-amlogic
 
 # 引入第三方插件。24.10 保留上游 Go feed，OpenList 固定为兼容 Go 1.23 的最后版本；
-# 25.12 使用 Go 27.x 并跟随 OpenList 最新 Release。
+# 25.12 用 OpenListTeam 的 Go 27.x 替换 feed，满足 OpenList 的 go 1.26.4/toolchain 1.27.3。
 if [ "${REPO_BRANCH:-openwrt-25.12}" = "openwrt-25.12" ]; then
   rm -rf -- feeds/packages/lang/golang
   git clone --depth=1 --branch 27.x https://github.com/OpenListTeam/packages_lang_golang.git feeds/packages/lang/golang
@@ -40,6 +46,33 @@ git clone --depth=1 --branch "${EASYTier_REF}" https://github.com/EasyTier/luci-
 git clone --depth=1 --branch "${NGINX_MANAGER_REF}" https://github.com/hello-yunshu/luci-app-nginx-manager.git package/luci-app-nginx-manager
 git clone --depth=1 --branch "${OPENLIST_REF}" https://github.com/OpenListTeam/OpenList-OpenWRT.git package/openlist
 
+# iStore：仓库没有 tag，固定到 commit；两个版本都复制。
+rm -rf -- package/luci-app-store package/luci-lib-taskd package/luci-lib-xterm package/taskd
+git init -q "${TMP_DIR}/istore"
+git -C "${TMP_DIR}/istore" remote add origin https://github.com/istoreos/istore.git
+git -C "${TMP_DIR}/istore" fetch -q --depth=1 origin "${ISTORE_COMMIT}"
+git -C "${TMP_DIR}/istore" checkout -q FETCH_HEAD
+for istore_pkg in luci-app-store luci-lib-taskd luci-lib-xterm taskd; do
+  cp -a -- "${TMP_DIR}/istore/luci/${istore_pkg}" package/
+done
+
+# 25.12 的 luci-app-acme 和 acme-acmesh-dnsapi 仍依赖已移除的 acme shorthand；
+# 直接改成依赖 acme-acmesh，避免空包和 Kconfig 递归依赖。
+# cloudflared 固定 golang1.27/host，而 Go feed 已被替换成 golang，需要同步改写。
+if [ "${REPO_BRANCH:-}" = "openwrt-25.12" ]; then
+  luci_acme_mk="feeds/luci/applications/luci-app-acme/Makefile"
+  acme_acmesh_mk="feeds/packages/net/acme-acmesh/Makefile"
+  if [ -f "${luci_acme_mk}" ]; then
+    sed -i 's/^LUCI_DEPENDS:=+luci-base +acme$/LUCI_DEPENDS:=+luci-base +acme-acmesh/' "${luci_acme_mk}"
+  fi
+  if [ -f "${acme_acmesh_mk}" ]; then
+    sed -i 's/^  DEPENDS:=+acme$/  DEPENDS:=+acme-acmesh/' "${acme_acmesh_mk}"
+  fi
+  if [ -f feeds/packages/net/cloudflared/Makefile ]; then
+    sed -i 's|golang1\.27/host|golang/host|' feeds/packages/net/cloudflared/Makefile
+  fi
+fi
+
 # 写入插件选择。
 cat >> .config <<'EOF'
 
@@ -63,9 +96,19 @@ if [ -f files/etc/config/amlogic ]; then
   sed -i "s|option amlogic_write_bootloader '.*'|option amlogic_write_bootloader '0'|" files/etc/config/amlogic
 fi
 
-# 修改默认主题。
-sed -i 's/luci-theme-design/luci-theme-argon/g' feeds/luci/collections/luci/Makefile
-sed -i 's/luci-theme-bootstrap/luci-theme-argon/g' feeds/luci/collections/luci/Makefile
+# amlogic 的 init 在 START=60 把 CPU governor/频率写入 sysfs；把 cpufreq 调到
+# START=61，未配置时它仍是 no-op，保存过设置后则以 cpufreq 为准。
+if [ -f package/emortal/cpufreq/files/cpufreq.init ]; then
+  sed -i 's/^START=15$/START=61/' package/emortal/cpufreq/files/cpufreq.init
+fi
+
+# 修改默认主题：luci 和 luci-light 两个 collection 都要替换，
+# 否则 luci-light 仍会把 luci-theme-bootstrap 装进固件。
+for collection in feeds/luci/collections/luci/Makefile feeds/luci/collections/luci-light/Makefile; do
+  if [ -f "${collection}" ]; then
+    sed -i 's/luci-theme-design/luci-theme-argon/g; s/luci-theme-bootstrap/luci-theme-argon/g' "${collection}"
+  fi
+done
 
 # 安装 Argon 主题资源。
 readonly ARGON_DIR="${WORKSPACE}/argon"
